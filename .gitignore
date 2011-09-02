@@ -5,6 +5,7 @@
 **/.DS_Store
 work/
 
+.classpath
 **/.classpath
 **/.project
 **/.settings/

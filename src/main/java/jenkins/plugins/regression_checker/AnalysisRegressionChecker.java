@@ -2,10 +2,10 @@ package jenkins.plugins.regression_checker;
 
 import hudson.Extension;
 import hudson.Launcher;
-import hudson.model.AbstractBuild;
-import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.Result;
+import hudson.model.AbstractBuild;
+import hudson.model.AbstractProject;
 import hudson.plugins.analysis.core.AbstractResultAction;
 import hudson.plugins.analysis.core.BuildResult;
 import hudson.plugins.checkstyle.CheckStyleResultAction;
@@ -18,20 +18,19 @@ import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
-import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.io.IOException;
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
+
+import org.kohsuke.stapler.DataBoundConstructor;
 
 public class AnalysisRegressionChecker extends Recorder {
 	private final boolean checkPMD;
 	private final boolean checkFindbugs;
 	private final boolean checkCheckstyle;
 	private final boolean checkCobertura;
-	private final int COVERAGE_THRESHOLD  = 85;
+	private final int COVERAGE_THRESHOLD = 85;
 
-    //TODO Lots of refactoring...
+	// TODO Lots of refactoring...
 	@DataBoundConstructor
 	public AnalysisRegressionChecker(Boolean checkPMD, Boolean checkFindbugs,
 			Boolean checkCheckstyle, Boolean checkCobertura) {
@@ -121,7 +120,13 @@ public class AnalysisRegressionChecker extends Recorder {
 					coverageRegressionFailureMessageForMetric(buildNumber,
 							diff, coverageMetric));
 			if (buildResult.getCoverage(coverageMetric).getPercentageFloat() > COVERAGE_THRESHOLD) {
-				listener.getLogger().println("Lower coverage than buildnumber: " + buildNumber +", but above threshold: " + COVERAGE_THRESHOLD + " so not failing build!");
+				listener.getLogger()
+						.println(
+								"Lower coverage than buildnumber: "
+										+ buildNumber
+										+ ", but above threshold: "
+										+ COVERAGE_THRESHOLD
+										+ " so not failing build!");
 			} else {
 				setBuildStatus(build);
 			}
@@ -193,14 +198,10 @@ public class AnalysisRegressionChecker extends Recorder {
 		default:
 			metricsText = "coverage";
 		}
-		NumberFormat percentInstance = DecimalFormat.getPercentInstance();
-		percentInstance.setMinimumFractionDigits(1);
-		percentInstance.setMaximumFractionDigits(1);
-
 		return "Regressions detected in Coverage Report. Compared to the current base line at build #"
 				+ buildNr
 				+ ", still "
-				+ percentInstance.format(diff / 100)
+				+ PercentageFormatter.format(diff)
 				+ " increased " + metricsText + "needed";
 	}
 
