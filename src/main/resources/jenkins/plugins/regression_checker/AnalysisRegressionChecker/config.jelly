@@ -23,4 +23,10 @@
       <label class="attach-previous">Cobertura</label>
     </f:nested>
   </j:if>
+ <j:if test="${descriptor.hasJacoco()}">
+    <f:nested>
+      <f:checkbox field="checkJacoco" />
+      <label class="attach-previous">Jacoco</label>
+    </f:nested>
+  </j:if>
 </j:jelly>

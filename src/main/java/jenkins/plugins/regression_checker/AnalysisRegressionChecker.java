@@ -2,255 +2,166 @@ package jenkins.plugins.regression_checker;
 
 import hudson.Extension;
 import hudson.Launcher;
-import hudson.model.BuildListener;
-import hudson.model.Result;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
-import hudson.plugins.analysis.core.AbstractResultAction;
-import hudson.plugins.analysis.core.BuildResult;
+import hudson.model.BuildListener;
+import hudson.model.Result;
 import hudson.plugins.checkstyle.CheckStyleResultAction;
 import hudson.plugins.cobertura.CoberturaBuildAction;
-import hudson.plugins.cobertura.targets.CoverageMetric;
-import hudson.plugins.cobertura.targets.CoverageResult;
 import hudson.plugins.findbugs.FindBugsResultAction;
+import hudson.plugins.jacoco.JacocoBuildAction;
 import hudson.plugins.pmd.PmdResultAction;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
+import jenkins.plugins.regression_checker.checks.CheckStyleChecker;
+import jenkins.plugins.regression_checker.checks.CoberturaCoverageChecker;
+import jenkins.plugins.regression_checker.checks.FindbugsChecker;
+import jenkins.plugins.regression_checker.checks.JacocoCoverageChecker;
+import jenkins.plugins.regression_checker.checks.PMDChecker;
+import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.io.IOException;
 
-import org.kohsuke.stapler.DataBoundConstructor;
-
+/**
+ * {@link hudson.tasks.Recorder} that captures code quality regression between builds.
+ *
+ * @author Peter Liljenberg
+ */
 public class AnalysisRegressionChecker extends Recorder {
-	private final boolean checkPMD;
-	private final boolean checkFindbugs;
-	private final boolean checkCheckstyle;
-	private final boolean checkCobertura;
-	private final int COVERAGE_THRESHOLD = 85;
+    private final boolean checkPMD;
+    private final boolean checkFindbugs;
+    private final boolean checkCheckstyle;
+    private final boolean checkCobertura;
+    private final boolean checkJacoco;
 
-	// TODO Lots of refactoring...
-	@DataBoundConstructor
-	public AnalysisRegressionChecker(Boolean checkPMD, Boolean checkFindbugs,
-			Boolean checkCheckstyle, Boolean checkCobertura) {
-		// Boolean and not boolean because younger version of Hudson fails to
-		// convert null to false
-		// if the plugin is not installed.
-		this.checkPMD = checkPMD != null && checkPMD;
-		this.checkCheckstyle = checkCheckstyle != null && checkCheckstyle;
-		this.checkFindbugs = checkFindbugs != null && checkFindbugs;
-		this.checkCobertura = checkCobertura != null && checkCobertura;
-	}
+    @DataBoundConstructor
+    public AnalysisRegressionChecker(Boolean checkPMD, Boolean checkFindbugs,
+                                     Boolean checkCheckstyle, Boolean checkCobertura, Boolean checkJacoco) {
+        this.checkPMD = evaluateBoolean(checkPMD);
+        this.checkCheckstyle = evaluateBoolean(checkCheckstyle);
+        this.checkFindbugs = evaluateBoolean(checkFindbugs);
+        this.checkCobertura = evaluateBoolean(checkCobertura);
+        this.checkJacoco = evaluateBoolean(checkJacoco);
+    }
 
-	public BuildStepMonitor getRequiredMonitorService() {
-		return BuildStepMonitor.NONE;
-	}
+    private boolean evaluateBoolean(Boolean b) {
+        return b != null && b;
+    }
 
-	@Override
-	public boolean perform(AbstractBuild<?, ?> build, Launcher launcher,
-			BuildListener listener) throws InterruptedException, IOException {
-		checkStatisticalCodeAnalysisRegression(build, listener);
-		checkCoverageRegression(build, listener);
-		// TODO Support different tools, Emma, Clover etc
-		return true;
-	}
+    public boolean isCheckPMD() {
+        return checkPMD;
+    }
 
-	private void checkStatisticalCodeAnalysisRegression(
-			AbstractBuild<?, ?> build, BuildListener listener) {
-		if (checkPMD)
-			check(build, listener, PmdResultAction.class);
-		if (checkFindbugs)
-			check(build, listener, FindBugsResultAction.class);
-		if (checkCheckstyle)
-			check(build, listener, CheckStyleResultAction.class);
-	}
+    public boolean isCheckFindbugs() {
+        return checkFindbugs;
+    }
 
-	private void checkCoverageRegression(AbstractBuild<?, ?> build,
-			BuildListener listener) {
-		if (checkCobertura) {
-			CoberturaBuildAction buildAction = build
-					.getAction(CoberturaBuildAction.class);
-			if (buildAction != null) {
-				CoverageResult buildResult = buildAction.getResult();
+    public boolean isCheckCheckstyle() {
+        return checkCheckstyle;
+    }
 
-				AbstractBuild<?, ?> lastSuccessBuild = getLatestSuccessfulBuild(build);
+    public boolean isCheckCobertura() {
+        return checkCobertura;
+    }
 
-				if (lastSuccessBuild != null) {
-					CoberturaBuildAction lastSuccessBuildAction = lastSuccessBuild
-							.getAction(CoberturaBuildAction.class);
-					if (lastSuccessBuildAction != null) {
-						CoverageResult lastSuccessBuildResult = lastSuccessBuildAction
-								.getResult();
-						checkCoverageRegressionForCoverageMetric(build,
-								listener, buildResult, lastSuccessBuildResult,
-								CoverageMetric.CONDITIONAL,
-								lastSuccessBuild.getNumber());
-						checkCoverageRegressionForCoverageMetric(build,
-								listener, buildResult, lastSuccessBuildResult,
-								CoverageMetric.LINE,
-								lastSuccessBuild.getNumber());
+    public boolean isCheckJacoco() {
+        return checkJacoco;
+    }
 
-					}
-				}
-			}
-		}
-	}
+    public BuildStepMonitor getRequiredMonitorService() {
+        return BuildStepMonitor.NONE;
+    }
 
-	private AbstractBuild<?, ?> getLatestSuccessfulBuild(
-			AbstractBuild<?, ?> build) {
-		AbstractBuild<?, ?> previousBuild = build.getPreviousBuild();
-		while (previousBuild != null
-				&& previousBuild.getResult() != Result.SUCCESS)
-			previousBuild = previousBuild.getPreviousBuild();
-		return previousBuild;
-	}
+    @Override
+    public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener)
+            throws InterruptedException, IOException {
+        if (build.getResult().isBetterOrEqualTo(Result.SUCCESS)) {
+            listener.getLogger().println("Running Code quality regression checks");
+            checkStatisticalCodeAnalysisRegression(build, listener);
+            checkCoverageRegression(build, listener);
+        }
+        // TODO Support different tools, Emma, Clover, CompilerWarnings etc
+        return true;
+    }
 
-	private void checkCoverageRegressionForCoverageMetric(
-			AbstractBuild<?, ?> build, BuildListener listener,
-			CoverageResult buildResult, CoverageResult lastSuccessBuildResult,
-			CoverageMetric coverageMetric, int buildNumber) {
+    private void checkStatisticalCodeAnalysisRegression(AbstractBuild<?, ?> build, BuildListener listener) {
+        if (checkPMD && DescriptorImpl.hasPMD()) {
+            new PMDChecker().checkRegressions(build, listener);
+        }
+        if (checkFindbugs && DescriptorImpl.hasFindbugs()) {
+            new FindbugsChecker().checkRegressions(build, listener);
+        }
+        if (checkCheckstyle && DescriptorImpl.hasCheckstyle()) {
+            new CheckStyleChecker().checkRegressions(build, listener);
+        }
+    }
 
-		float diff = lastSuccessBuildResult.getCoverage(coverageMetric)
-				.getPercentageFloat()
-				- buildResult.getCoverage(coverageMetric).getPercentageFloat();
+    private void checkCoverageRegression(AbstractBuild<?, ?> build, BuildListener listener) {
+        if (checkCobertura && DescriptorImpl.hasCobertura()) {
+            new CoberturaCoverageChecker().checkRegressions(build, listener);
+        }
+        if (checkJacoco && DescriptorImpl.hasJacoco()) {
+            new JacocoCoverageChecker().checkRegressions(build, listener);
+        }
+    }
 
-		if (diff > 0) {
-			listener.getLogger().println(
-					coverageRegressionFailureMessageForMetric(buildNumber,
-							diff, coverageMetric));
-			if (buildResult.getCoverage(coverageMetric).getPercentageFloat() > COVERAGE_THRESHOLD) {
-				listener.getLogger()
-						.println(
-								"Lower coverage than buildnumber: "
-										+ buildNumber
-										+ ", but above threshold: "
-										+ COVERAGE_THRESHOLD
-										+ " so not failing build!");
-			} else {
-				setBuildStatus(build);
-			}
-		}
-	}
+    @Extension(ordinal = -100)
+    public static class DescriptorImpl extends BuildStepDescriptor<Publisher> {
+        @Override
+        public boolean isApplicable(Class<? extends AbstractProject> aClass) {
+            return true;
+        }
 
-	private void setBuildStatus(AbstractBuild<?, ?> build) {
-		build.setResult(Result.FAILURE);
-	}
+        public static boolean hasFindbugs() {
+            try {
+                FindBugsResultAction.class.getName();
+                return true;
+            } catch (LinkageError e) {
+                return false;
+            }
+        }
 
-	private <T extends AbstractResultAction<R>, R extends BuildResult> void check(
-			AbstractBuild<?, ?> build, BuildListener listener,
-			Class<T> resultType) {
-		T buildAction = build.getAction(resultType);
-		if (buildAction != null) {
-			// find the previous successful build
-			AbstractBuild<?, ?> lastSuccessfulBuild = getLatestSuccessfulBuild(build);
+        public static boolean hasPMD() {
+            try {
+                PmdResultAction.class.getName();
+                return true;
+            } catch (LinkageError e) {
+                return false;
+            }
+        }
 
-			if (lastSuccessfulBuild != null) {
-				T lastSuccessBuildAction = lastSuccessfulBuild
-						.getAction(resultType);
-				if (lastSuccessBuildAction != null) {
-					R lastSuccessBuildResult = lastSuccessBuildAction
-							.getResult();
-					R buildResult = buildAction.getResult();
-					int diff = buildResult.getNumberOfWarnings()
-							- lastSuccessBuildResult.getNumberOfWarnings();
-					if (diff > 0) {
-						listener.getLogger()
-								.println(
-										Messages.PmdRegressionChecker_RegressionsDetected2(
-												buildAction.getDisplayName(),
-												lastSuccessfulBuild.getNumber(),
-												diff));
-						setBuildStatus(build);
-						return;
-					}
-				}
-			}
-		}
-	}
+        public static boolean hasCheckstyle() {
+            try {
+                CheckStyleResultAction.class.getName();
+                return true;
+            } catch (LinkageError e) {
+                return false;
+            }
+        }
 
-	public boolean isCheckPMD() {
-		return checkPMD;
-	}
+        public static boolean hasCobertura() {
+            try {
+                CoberturaBuildAction.class.getName();
+                return true;
+            } catch (LinkageError e) {
+                return false;
+            }
+        }
 
-	public boolean isCheckFindbugs() {
-		return checkFindbugs;
-	}
+        public static boolean hasJacoco() {
+            try {
+                JacocoBuildAction.class.getName();
+                return true;
+            } catch (LinkageError e) {
+                return false;
+            }
+        }
 
-	public boolean isCheckCheckstyle() {
-		return checkCheckstyle;
-	}
-
-	public boolean isCheckCobertura() {
-		return checkCobertura;
-	}
-
-	private String coverageRegressionFailureMessageForMetric(int buildNr,
-			float diff, CoverageMetric coverageMetric) {
-		String metricsText = "";
-		switch (coverageMetric) {
-		case CONDITIONAL:
-			metricsText = "branchcoverage ";
-			break;
-		case LINE:
-			metricsText = "linecoverage ";
-			break;
-		default:
-			metricsText = "coverage";
-		}
-		return "Regressions detected in Coverage Report. Compared to the current base line at build #"
-				+ buildNr
-				+ ", still "
-				+ PercentageFormatter.format(diff)
-				+ " increased " + metricsText + "needed";
-	}
-
-	@Extension(ordinal = -100)
-	public static class DescriptorImpl extends BuildStepDescriptor<Publisher> {
-		@Override
-		public boolean isApplicable(Class<? extends AbstractProject> aClass) {
-			return true;
-		}
-
-		public boolean hasFindbugs() {
-			try {
-				FindBugsResultAction.class.getName();
-				return true;
-			} catch (LinkageError e) {
-				return false;
-			}
-		}
-
-		public boolean hasPMD() {
-			try {
-				PmdResultAction.class.getName();
-				return true;
-			} catch (LinkageError e) {
-				return false;
-			}
-		}
-
-		public boolean hasCheckstyle() {
-			try {
-				CheckStyleResultAction.class.getName();
-				return true;
-			} catch (LinkageError e) {
-				return false;
-			}
-		}
-
-		public boolean hasCobertura() {
-			try {
-				CoberturaBuildAction.class.getName();
-				return true;
-			} catch (LinkageError e) {
-				return false;
-			}
-		}
-
-		@Override
-		public String getDisplayName() {
-			return "Fail the build if the code analysis worsens";
-		}
-	}
+        @Override
+        public String getDisplayName() {
+            return "Fail the build if the code quality decrease";
+        }
+    }
 }
